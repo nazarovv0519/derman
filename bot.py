@@ -1,87 +1,75 @@
-﻿from telegram import Update, InputMediaPhoto
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, ConversationHandler, filters
+import os
+from telegram import Update, InputMediaPhoto
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-BOT_TOKEN = '7334470377:AAHltUJ6iYtwxEH-PrLEKonkwni8KBz8jhM'
-CHANNEL_ID = -1002698499154  # Заменить на ID канала
+BOT_TOKEN = os.getenv("7334470377:AAHltUJ6iYtwxEH-PrLEKonkwni8KBz8jhM")
+CHANNEL_ID = int(os.getenv("-1002698499154"))
 
-# Этапы диалога
-ID, LEVEL, PRICE, CONTACT, PHOTOS = range(5)
-
-# Хранилище временных данных
-user_data_store = {}
+user_data = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("?? Введите Айди аккаунта:")
-    return ID
+    user_data[update.effective_chat.id] = {"photos": []}
+    await update.message.reply_text("Привет! Введи Айди аккаунта:")
 
-async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['id'] = update.message.text
-    await update.message.reply_text("?? Введите уровень аккаунта:")
-    return LEVEL
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    text = update.message.text
+    if chat_id not in user_data:
+        await update.message.reply_text("Напиши /start сначала.")
+        return
 
-async def get_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['level'] = update.message.text
-    await update.message.reply_text("?? Укажите цену:")
-    return PRICE
+    data = user_data[chat_id]
+    if "id" not in data:
+        data["id"] = text
+        await update.message.reply_text("Теперь введи уровень:")
+    elif "level" not in data:
+        data["level"] = text
+        await update.message.reply_text("Теперь введи цену:")
+    elif "price" not in data:
+        data["price"] = text
+        await update.message.reply_text("Теперь введи контакт продавца:")
+    elif "contact" not in data:
+        data["contact"] = text
+        await update.message.reply_text("Теперь отправь скриншоты (до 5). Когда закончишь — напиши /done")
 
-async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['price'] = update.message.text
-    await update.message.reply_text("?? Как с вами связаться (ник, тг и т.д.):")
-    return CONTACT
-
-async def get_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['contact'] = update.message.text
-    await update.message.reply_text("?? Отправьте скриншоты (макс 5). Когда закончите — напишите /done.")
-    context.user_data['photos'] = []
-    return PHOTOS
-
-async def get_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo = update.message.photo[-1].file_id  # Последнее (лучшее) качество
-    context.user_data['photos'].append(photo)
-    if len(context.user_data['photos']) >= 5:
-        return await done(update, context)
+async def handle_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in user_data:
+        return
+    photo = update.message.photo[-1]
+    user_data[chat_id]["photos"].append(photo.file_id)
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = context.user_data
-    caption = (
-        f"?? Новая заявка:\n"
-        f"?? Айди: {data['id']}\n"
-        f"?? Уровень: {data['level']}\n"
-        f"?? Цена: {data['price']}\n"
-        f"?? Связь: {data['contact']}"
+    chat_id = update.effective_chat.id
+    if chat_id not in user_data:
+        await update.message.reply_text("Сначала напиши /start.")
+        return
+
+    data = user_data.pop(chat_id)
+    text = (
+        f"📥 Новая заявка:\n\n"
+        f"🔹 Айди аккаунта: {data['id']}\n"
+        f"🔹 Уровень: {data['level']}\n"
+        f"💰 Цена: {data['price']}\n"
+        f"📞 Контакт: {data['contact']}"
     )
 
-    # Если есть фото
-    if data.get('photos'):
-        media = [InputMediaPhoto(media=photo, caption=caption if i == 0 else "") for i, photo in enumerate(data['photos'])]
-        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media)
+    if data["photos"]:
+        media = [InputMediaPhoto(photo_id) for photo_id in data["photos"][:5]]
+        await context.bot.send_message(CHANNEL_ID, text)
+        await context.bot.send_media_group(CHANNEL_ID, media)
     else:
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=caption)
+        await context.bot.send_message(CHANNEL_ID, text)
 
-    await update.message.reply_text("? Заявка отправлена в канал!")
-    return ConversationHandler.END
+    await update.message.reply_text("✅ Заявка отправлена!")
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("? Заявка отменена.")
-    return ConversationHandler.END
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("done", done))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photos))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.run_polling()
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-conv = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_id)],
-        LEVEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_level)],
-        PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)],
-        CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_contact)],
-        PHOTOS: [
-            MessageHandler(filters.PHOTO, get_photo),
-            CommandHandler("done", done)
-        ],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-
-app.add_handler(conv)
-
-app.run_polling()
+if __name__ == "__main__":
+    main()
