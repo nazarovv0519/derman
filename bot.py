@@ -2,7 +2,7 @@ import os
 from telegram import Update, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-BOT_TOKEN = os.getenv("7334470377:AAHltUJ6iYtwxEH-PrLEKonkwni8KBz8jhM")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
 user_data = {}
